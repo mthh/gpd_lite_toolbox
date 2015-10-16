@@ -280,3 +280,47 @@ def read_spatialite(sql, conn, geom_col='geometry', crs=None,
         sql, conn, geom_col=geom_col, crs=crs, index_col=index_col,
         coerce_float=coerce_float, params=params
         )
+
+
+def mean_coordinates(gdf, id_field=None, weight_field=None):
+    """
+    Compute the mean coordinate(s) of a set of points. If a *weight-field*
+    (numerical field) is provided, the point(s) will be located according it.
+    If an *id_field* is given, a mean coordinate pt will be calculated for each
+    subset of points differencied by this *id_field*.
+
+    :param gdf:
+
+    :param str id_field:
+
+    :param str weight_field:
+
+    Return a new GeoDataFrame with the location of computed point(s).
+    """
+    assert 'Multi' not in gdf.geometry.geom_type, \
+        "Multipart geometries aren't allowed"
+    fields = ['geometry']
+    if id_field:
+        assert id_field in gdf.columns
+        fields.append(id_field)
+    if weight_field:
+        assert weight_field in gdf.columns
+        fields.append(weight_field)
+    else:
+        weight_field = 'count'
+    tmp = gdf[fields].copy()
+    tmp['x'] = tmp.geometry.apply(lambda x: x.coords.xy[0][0])
+    tmp['y'] = tmp.geometry.apply(lambda x: x.coords.xy[1][0])
+    tmp.x = tmp.x * tmp[weight_field]
+    tmp.y = tmp.y * tmp[weight_field]
+    tmp['count'] = 1
+    if id_field:
+        tmp = tmp.groupby(id_field).sum()
+    else:
+        tmp = tmp.sum()
+        tmp = tmp.T
+    tmp.x = tmp.x / tmp[weight_field]
+    tmp.y = tmp.y / tmp[weight_field]
+    tmp['geometry'] = [Point(i[0], i[1]) for i in tmp[['x', 'y']].values]
+    return GeoDataFrame(tmp[weight_field], geometry=tmp['geometry'],
+                        index=tmp.index).reset_index()
