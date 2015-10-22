@@ -9,12 +9,20 @@ import rtree
 import numpy as np
 import pandas as pd
 import geopandas as gpd
-from shapely.geometry import shape
+#from shapely.geometry import shape
+from sklearn.preprocessing import normalize
 from sklearn.metrics.pairwise import pairwise_distances
 
 
 def nrepeat(iterable, n):
     return iter([i for i in iterable for j in range(n)])
+
+
+def dbl_range(df_item):
+    for i in df_item.iterrows():
+        for j in df_item.iterrows():
+            if i[0] != j[0]:
+                yield i[0], i[1], j[0], j[1]
 
 
 def db_creation(path):
@@ -50,7 +58,6 @@ def make_index(bounds):
 
 
 def mparams(gdf1):
-    import math
     params = []
     for i in range(len(gdf1)):
         ftg = gdf1.geometry[i]
@@ -89,12 +96,33 @@ def bearing_180(li1):
     first_pt_x, first_pt_y = li1.coords.xy[0][0], li1.coords.xy[1][0]
     last_pt_x, last_pt_y = li1.coords.xy[0][len_li], li1.coords.xy[1][len_li]
     b = 180 + math.atan2(
-            (first_pt_x - last_pt_x), (first_pt_y - last_pt_y)
-            ) * (180 / math.pi)
+        (first_pt_x - last_pt_x), (first_pt_y - last_pt_y)
+        ) * (180 / math.pi)
     if b > 180:
         return 180 - b
     else:
         return b
+
+
+def dorling_radius(poly, value_field, ratio, pi=np.pi, sqrt=np.sqrt):
+    cum_dist, cum_rad = 0, 0
+    centroids = poly.geometry.centroid
+    for i in range(len(centroids)):
+        for j in range(len(centroids)):
+            if i != j:
+                l = centroids.geometry[i].distance(centroids.geometry[j])
+                d = sqrt(poly.iloc[i][value_field]/pi) \
+                    + sqrt(poly.iloc[j][value_field]/pi)
+                cum_dist = cum_dist + l
+                cum_rad = cum_rad + d
+
+    scale = cum_dist / cum_rad
+    radiuses = sqrt(poly[value_field]/pi) * scale * ratio
+    norm_areas = normalize(
+        [poly.geometry[i].area for i in range(len(poly))]
+        )[0]
+    return radiuses * norm_areas
+
 
 class Borderiz(object):
     def __init__(self, gdf_polygon):
@@ -175,7 +203,7 @@ class Borderiz(object):
                     pass
         self.result = gpd.GeoDataFrame(
             resattrs, geometry=resgeom,
-            columns=['FRONT', 'FRONT_r'], 
+            columns=['FRONT', 'FRONT_r'],
             index=pd.Int64Index([i for i in range(len(resattrs))])
             )
 #        self.result = self.result.ix[[not self.result.geometry[i].is_ring
