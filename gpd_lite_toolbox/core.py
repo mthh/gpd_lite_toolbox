@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-Geopandas lite toolbox
+gpd_lite_toolboox
+@author: mthh
 """
 import shapely.ops
 import numpy as np
@@ -9,10 +10,8 @@ from sklearn.cluster import KMeans
 from shapely.geometry import Point, Polygon
 from geopandas import GeoDataFrame
 from sklearn.metrics.pairwise import pairwise_distances
-#from sklearn.preprocessing import normalize
 
-from cycartogram import Cartogram
-from utils import (
+from .utils import (
     db_connect, Borderiz, dbl_range,
     make_index, nrepeat, mparams, dorling_radius
     )
@@ -20,7 +19,7 @@ from utils import (
 __all__ = ['get_borders', 'find_borders', 'transform_cartogram', 'dissolve',
            'intersects_byid', 'multi_to_single', 'dumb_multi_to_single',
            'snap_to_nearest', 'read_spatialite', 'match_lines',
-           'non_contiguous_cartogram', 'make_grid', 'random_pts_on_surface']
+           'non_contiguous_cartogram', 'make_grid']
 
 
 def match_lines(gdf1, gdf2, method='cheap_hausdorff', limit=None):
@@ -226,6 +225,7 @@ def transform_cartogram(gdf, field_name, iterations=5, inplace=False):
     "An algorithm to construct continuous cartograms."
     Professional Geographer 37:75-81``
     """
+    from .cycartogram import Cartogram
     assert isinstance(iterations, int) and iterations > 0, \
         "Iteration number have to be a positive integer"
     assert field_name in gdf.columns
@@ -549,8 +549,10 @@ def random_pts_on_surface(gdf, coef=1, nb_field=None):
         pts_to_create = nb_pts[i]
         while True:
             (minx, miny, maxx, maxy) = gdf.geometry[i].bounds
-            xpt = (maxx-minx) * np.random.random_sample((pts_to_create,)) + minx
-            ypt = (maxy-miny) * np.random.random_sample((pts_to_create,)) + miny
+            xpt = \
+                (maxx-minx) * np.random.random_sample((pts_to_create,)) + minx
+            ypt = \
+                (maxy-miny) * np.random.random_sample((pts_to_create,)) + miny
             points = np.array([xpt, ypt]).T
             for pt_ in points:
                 pt_geom = Point((pt_[0], pt_[1]))
@@ -658,7 +660,6 @@ def non_contiguous_cartogram(gdf, value, nrescales,
     """
     ratios = [1 - i/nrescales for i in range(nrescales)]
     gdf2 = gdf.copy()
-#    gdf2[value] = normalize(gdf2[value])[0]
     gdf2.geometry = gdf2.geometry.centroid
     for ratio in ratios:
         radius = dorling_radius(gdf, value, ratio)
