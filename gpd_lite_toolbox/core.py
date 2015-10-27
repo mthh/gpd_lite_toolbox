@@ -19,7 +19,8 @@ from .utils import (
 __all__ = ['get_borders', 'find_borders', 'transform_cartogram', 'dissolve',
            'intersects_byid', 'multi_to_single', 'dumb_multi_to_single',
            'snap_to_nearest', 'read_spatialite', 'match_lines',
-           'non_contiguous_cartogram', 'make_grid']
+           'mean_coordinates', 'non_contiguous_cartogram', 'make_grid',
+           'gridify_data', 'random_pts_on_surface']
 
 
 def match_lines(gdf1, gdf2, method='cheap_hausdorff', limit=None):
@@ -561,7 +562,7 @@ def random_pts_on_surface(gdf, coef=1, nb_field=None):
                     pts_to_create -= 1
             if pts_to_create == 0:
                 break
-    return res
+    return GeoDataFrame(geometry=res, crs=gdf.crs)
 
 
 def make_grid(gdf, height, cut=True):
@@ -581,9 +582,6 @@ def make_grid(gdf, height, cut=True):
         Cut the grid to fit the shape of *gdf* (ceil partially covering it will
         be truncated, see *preserve_ceil* parameter). If False, the returned
         grid fit the counding box of gdf.
-    preserve_ceil: Boolean, default False
-        Only used if cut=True, so only ceils who cover *gdf* will be returned
-        but ceils who only partially cover it won't be cut.
 
     Returns
     -------
@@ -616,16 +614,81 @@ def make_grid(gdf, height, cut=True):
         x_left_origin = x_left_origin + height
         x_right_origin = x_right_origin + height
     if cut:
-        return GeoDataFrame(
-            geometry=pd.Series(res_geoms).apply(lambda x: Polygon(x)),
-            crs=gdf.crs
-            ).intersection(unary_union(gdf.geometry))
+        if all(gdf.eval(
+            'geometry.type ==\'Polygon\' or geometry.type ==\'MultiPolygon\'')
+            ):
+            res = GeoDataFrame(
+                geometry=pd.Series(res_geoms).apply(lambda x: Polygon(x)),
+                crs=gdf.crs
+                ).intersection(unary_union(gdf.geometry).convex_hull)
+        else:
+            res = GeoDataFrame(
+                geometry=pd.Series(res_geoms).apply(lambda x: Polygon(x)),
+                crs=gdf.crs
+                ).intersection(unary_union(gdf.geometry).convex_hull)
+        res = res[res.geometry.type == 'Polygon']
+        res.index = [i for i in range(len(res))]
+        return GeoDataFrame(geometry=res)
+
     else:
         return GeoDataFrame(
             index=[i for i in range(len(res_geoms))],
             geometry=pd.Series(res_geoms).apply(lambda x: Polygon(x)),
             crs=gdf.crs
             )
+
+
+def gridify_data(gdf, height, col_name, cut=True, method=np.mean):
+    """
+    Gridify a collection of point observations.
+
+    Parameters
+    ----------
+    gdf: GeoDataFrame
+        The collection of polygons the be covered by the grid.
+    height: Integer
+        The dimension (will be used as height an width) of the ceils to create,
+        in units of *gdf*.
+    col_name: String
+        The name of the column containing the value to use for the grid ceil.
+    cut: Boolean, default True
+        Cut the grid to fit the shape of *gdf* (ceil partially covering it will
+        be truncated, see *preserve_ceil* parameter). If False, the returned
+        grid fit the counding box of gdf.
+    method: Numpy/Pandas function
+        The method to aggregate values of points for each cell.
+        (like numpy.max, numpy.mean, numpy.mean, numpy.std or numpy.sum)
+
+    Returns
+    -------
+    grid: GeoDataFrame
+        A collection of polygon.
+
+    Example
+    -------
+    >>> all(gdf.geometry.type == 'Point')  # The function only act on Points
+    True
+    >>> gdf.time.dtype  # And the value to aggreagate have to be numerical
+    dtype('int64')
+    >>> result = gridify_data(gdf, 7500, 'time', method=np.min)
+    >>> plot_dataframe(res, column='time')
+    <matplotlib.axes._subplots.AxesSubplot at 0x7f8336373a20>
+    ...
+    """
+    if not all(gdf.geometry.type == 'Point'):
+        raise ValueError("Can only gridify scattered data (Point)")
+    if not gdf[col_name].dtype.kind in {'i', 'f'}:
+        raise ValueError("Target column have to be a numerical field")
+
+    grid = make_grid(gdf, height, cut)
+    grid[col_name] = np.NaN
+    index = make_index([i.bounds for i in gdf.geometry])
+    for id_ceil in range(len(grid)):
+        ids_pts = list(index.intersection(
+            grid.geometry[id_ceil].bounds, objects='raw'))
+        res = method(gdf.iloc[ids_pts][col_name])
+        grid.loc[id_ceil, col_name] = res
+    return grid
 
 
 def non_contiguous_cartogram(gdf, value, nrescales,
