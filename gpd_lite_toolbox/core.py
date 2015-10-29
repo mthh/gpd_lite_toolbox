@@ -11,10 +11,10 @@ from shapely.geometry import Point, Polygon
 from geopandas import GeoDataFrame
 from sklearn.metrics.pairwise import pairwise_distances
 
-from .utils import (
-    db_connect, Borderiz, dbl_range,
-    make_index, nrepeat, mparams, dorling_radius
-    )
+#from .utils import (
+#    db_connect, Borderiz, dbl_range, ftouches_byid,
+#    make_index, nrepeat, mparams, dorling_radius, dorling_radius2
+#    )
 
 __all__ = ['get_borders', 'find_borders', 'transform_cartogram', 'dissolve',
            'intersects_byid', 'multi_to_single', 'dumb_multi_to_single',
@@ -218,7 +218,7 @@ def transform_cartogram(gdf, field_name, iterations=5, inplace=False):
 
     Returns
     -------
-    GeoDataFrame: A new GeoDataFram (or None if inplace=True)
+    GeoDataFrame: A new GeoDataFrame (or None if inplace=True)
 
     References
     ----------
@@ -226,7 +226,7 @@ def transform_cartogram(gdf, field_name, iterations=5, inplace=False):
     "An algorithm to construct continuous cartograms."
     Professional Geographer 37:75-81``
     """
-    from .cycartogram import Cartogram
+    from gpd_lite_toolbox.cycartogram import Cartogram
     assert isinstance(iterations, int) and iterations > 0, \
         "Iteration number have to be a positive integer"
     assert field_name in gdf.columns
@@ -249,7 +249,7 @@ def intersects_byid(geoms1, geoms2):
     geoms1: GeoSeries or GeoDataFrame
         Collection on which the intersecting table will be based.
     geoms2: GeoSeries or GeoDataFrame
-        Collection to test on intersect.
+        Collection to test on intersects.
 
     Returns
     -------
@@ -441,7 +441,8 @@ def read_spatialite(sql, conn, geom_col='geometry', crs=None,
                               geom_col="GEOM")
     >>> # Without being already connected to the database :
     >>> gdf = read_spatialite("SELECT PK_UID, pop_t, gdp FROM countries", None,
-                              geom_col="GEOM", db_path='/home/mthh/tmp/db.sqlite')
+                              geom_col="GEOM",
+                              db_path='/home/mthh/tmp/db.sqlite')
     """
     from geopandas import read_postgis
     if '*' in sql:
@@ -568,25 +569,25 @@ def random_pts_on_surface(gdf, coef=1, nb_field=None):
 def make_grid(gdf, height, cut=True):
     """
     Return a grid, based on the shape of *gdf* and on a *height* value (in
-    units of *gdf*). If cut=False, the grid will not be intersected with gdf
+    units of *gdf*). If cut=False, the grid will not be intersected with *gdf*
     (i.e it makes a grid on the bounding-box of *gdf*).
 
     Parameters
     ----------
     gdf: GeoDataFrame
-        The collection of polygons the be covered by the grid.
+        The collection of polygons to be covered by the grid.
     height: Integer
-        The dimension (will be used as height an width) of the ceils to create,
+        The dimension (will be used as height and width) of the ceils to create,
         in units of *gdf*.
     cut: Boolean, default True
         Cut the grid to fit the shape of *gdf* (ceil partially covering it will
-        be truncated, see *preserve_ceil* parameter). If False, the returned
-        grid fit the counding box of gdf.
+        be truncated). If False, the returned grid will fit the bounding box
+        of *gdf*.
 
     Returns
     -------
     grid: GeoDataFrame
-        A collection of polygon.
+        A collection of polygons.
     """
     from math import ceil
     from shapely.ops import unary_union
@@ -615,8 +616,7 @@ def make_grid(gdf, height, cut=True):
         x_right_origin = x_right_origin + height
     if cut:
         if all(gdf.eval(
-            'geometry.type ==\'Polygon\' or geometry.type ==\'MultiPolygon\'')
-            ):
+            "geometry.type =='Polygon' or geometry.type =='MultiPolygon'")):
             res = GeoDataFrame(
                 geometry=pd.Series(res_geoms).apply(lambda x: Polygon(x)),
                 crs=gdf.crs
@@ -645,16 +645,15 @@ def gridify_data(gdf, height, col_name, cut=True, method=np.mean):
     Parameters
     ----------
     gdf: GeoDataFrame
-        The collection of polygons the be covered by the grid.
+        The collection of polygons to be covered by the grid.
     height: Integer
-        The dimension (will be used as height an width) of the ceils to create,
+        The dimension (will be used as height and width) of the ceils to create,
         in units of *gdf*.
     col_name: String
-        The name of the column containing the value to use for the grid ceil.
+        The name of the column containing the value to use for the grid cells.
     cut: Boolean, default True
         Cut the grid to fit the shape of *gdf* (ceil partially covering it will
-        be truncated, see *preserve_ceil* parameter). If False, the returned
-        grid fit the counding box of gdf.
+        be truncated). If False, the returned grid fit the bounding box of gdf.
     method: Numpy/Pandas function
         The method to aggregate values of points for each cell.
         (like numpy.max, numpy.mean, numpy.mean, numpy.std or numpy.sum)
@@ -662,7 +661,7 @@ def gridify_data(gdf, height, col_name, cut=True, method=np.mean):
     Returns
     -------
     grid: GeoDataFrame
-        A collection of polygon.
+        A collection of polygons.
 
     Example
     -------
@@ -670,8 +669,8 @@ def gridify_data(gdf, height, col_name, cut=True, method=np.mean):
     True
     >>> gdf.time.dtype  # And the value to aggreagate have to be numerical
     dtype('int64')
-    >>> result = gridify_data(gdf, 7500, 'time', method=np.min)
-    >>> plot_dataframe(res, column='time')
+    >>> grid_data = gridify_data(gdf, 7500, 'time', method=np.min)
+    >>> plot_dataframe(grid_data, column='time')
     <matplotlib.axes._subplots.AxesSubplot at 0x7f8336373a20>
     ...
     """
@@ -681,13 +680,14 @@ def gridify_data(gdf, height, col_name, cut=True, method=np.mean):
         raise ValueError("Target column have to be a numerical field")
 
     grid = make_grid(gdf, height, cut)
-    grid[col_name] = np.NaN
+    grid[col_name] = -1
     index = make_index([i.bounds for i in gdf.geometry])
-    for id_ceil in range(len(grid)):
+    for id_cell in range(len(grid)):
         ids_pts = list(index.intersection(
-            grid.geometry[id_ceil].bounds, objects='raw'))
-        res = method(gdf.iloc[ids_pts][col_name])
-        grid.loc[id_ceil, col_name] = res
+            grid.geometry[id_cell].bounds, objects='raw'))
+        if ids_pts:
+            res = method(gdf.iloc[ids_pts][col_name])
+            grid.loc[id_cell, col_name] = res
     return grid
 
 
@@ -719,7 +719,7 @@ def non_contiguous_cartogram(gdf, value, nrescales,
     Returns
     -------
     cartogram: GeoDataFrame
-        A new geodataframe with transformed geometry, ready to map.
+        A new geodataframe with transformed geometries, ready to map.
     """
     ratios = [1 - i/nrescales for i in range(nrescales)]
     gdf2 = gdf.copy()
@@ -750,3 +750,4 @@ def non_contiguous_cartogram(gdf, value, nrescales,
              for i in range(len(gdf2))]
     gdf2['geometry'] = geoms
     return gdf2
+
