@@ -13,7 +13,7 @@ import geopandas as gpd
 #from shapely.geometry import shape
 from sklearn.preprocessing import normalize
 from sklearn.metrics.pairwise import pairwise_distances
-
+from shapely.geos import TopologicalError
 
 def nrepeat(iterable, n):
     return iter([i for i in iterable for j in range(n)])
@@ -104,8 +104,8 @@ def bearing_180(li1):
     else:
         return b
 
-
-def dorling_radius(poly, value_field, ratio, pi=np.pi, sqrt=np.sqrt):
+def dorling_radius(poly, value_field, ratio,
+                   pi=np.pi, sqrt=np.sqrt):
     cum_dist, cum_rad = 0, 0
     centroids = poly.geometry.centroid
     for i in range(len(centroids)):
@@ -123,6 +123,93 @@ def dorling_radius(poly, value_field, ratio, pi=np.pi, sqrt=np.sqrt):
         [poly.geometry[i].area for i in range(len(poly))]
         )[0]
     return radiuses * norm_areas
+
+
+def dorling_radius2(poly, value_field, ratio, mat_shared_border,
+                   pi=np.pi, sqrt=np.sqrt):
+    cum_dist, cum_rad = 0, 0
+    centroids = poly.geometry.centroid
+    for i in range(len(centroids)):
+        for j in range(len(centroids)):
+            if i != j:
+                fp = abs(
+                    round(mat_shared_border[i][j] / mat_shared_border[i].sum(), 2) - 1)
+                l = centroids.geometry[i].distance(centroids.geometry[j])
+                d = sqrt(poly.iloc[i][value_field]/pi) \
+                    + sqrt(poly.iloc[j][value_field]/pi)
+                cum_dist = cum_dist + l*(fp/2)
+                cum_rad = cum_rad + d
+#                print(fp, cum_dist, cum_rad)
+    scale = cum_dist / cum_rad
+    radiuses = sqrt(poly[value_field]/pi) * scale * ratio
+    norm_areas = normalize(
+        [poly.geometry[i].area for i in range(len(poly))]
+        )[0]
+    return radiuses * norm_areas
+
+def l_shared_border(gdf, touche_table):
+    dim = len(touche_table)
+    mat_sh_bord = np.empty((dim,dim))
+    for id1 in range(dim):
+        for id2 in touche_table.iloc[id1]:
+            mat_sh_bord[id1][id2] = \
+                (gdf.geometry[id1].buffer(0.01).intersection(gdf.geometry[id2])).length
+            mat_sh_bord[id2][id1] = mat_sh_bord[id1][id2]
+    return mat_sh_bord
+
+def ftouches_byid(geoms1, geoms2, tolerance=0):
+    """
+    Return a table with a row for each features of *geoms1*, containing the id
+    of each *geoms2* touching features.
+    The test is not based on the *touches* predicat but on a intersects
+    between the two features (which are buffered with *tolerance*)
+
+    Parameters
+    ----------
+    geoms1: GeoSeries or GeoDataFrame
+        Collection on which the touching table will be based.
+    geoms2: GeoSeries or GeoDataFrame
+        Collection to test against the first one.
+    tolerance: Float
+        The tolerance within two features as considered as touching.
+        (in unit of both input collections)
+
+    Returns
+    -------
+    touching_table: pandas.Series
+        A Series with the same index id as geoms1, each row containg the ids of
+        the features of geoms2 touching it.
+    """
+    return geoms1.geometry.apply(
+        lambda x: [i for i in range(len(geoms2.geometry))
+                   if x.intersects(geoms2.geometry[i].buffer(tolerance))]
+        )
+
+
+def intersection_part(g1, g2):
+    """
+    Return the part of *g1* which is covered by *g2*.
+    Return 0 if no intersection or invalid geom(s).
+
+    Parameters
+    ----------
+    g1: Shapely.geometry
+    g2: Shapely.geometry
+    """
+    try:
+        if g1.intersects(g2):
+            return g1.intersection(g2).area / g1.area
+        else:
+            return 0
+    except TopologicalError as err:
+        print('Warning : {}'.format(err))
+        return 0
+
+
+def intersection_part_table(geoms1, geoms2):
+    return geoms1.geometry.apply(
+        lambda x: [intersection_part(x, geoms2.geometry[i]) for i in range(len(geoms2.geometry))]
+        )
 
 
 class Borderiz(object):
