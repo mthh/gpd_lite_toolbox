@@ -1,4 +1,7 @@
 # -*- coding: utf-8 -*-
+#cython: boundscheck = False
+#cython: wraparound = False
+#cython: cdivision = True
 """
  cycartogram extension:
 
@@ -20,233 +23,231 @@
     No warranty concerning the result.
     Copyright (C) 2013 Carson Farmer, 2015  mthh
 """
-
-import math
-from geopandas import GeoSeries
-from shapely.geometry import LineString, MultiLineString, Polygon, MultiPolygon
+from shapely.geometry import LineString, Polygon, MultiPolygon
 from libc.math cimport sqrt
 from cpython cimport array
+from libc.stdlib cimport malloc, free
 
-cdef object transform_geom(list aLocal, float dForceReductionFactor,
-                           object geom, int featCount):
+
+def make_cartogram(geodf, field_name, iterations=5, inplace=False):
     """
-    Core function computing the transformation on the Polygon (or on each
-        polygon, if multipolygon layer), using previously retieved informations
-        about its geometry and about other feature geometries.
+    Make a continuous cartogram on a geopandas.GeoDataFrame collection
+    of Polygon/MultiPolygon (wrapper to call the core functions
+    written in cython).
+    Based on the transformation of Dougenik and al.(1985).
+
+    Parameters
+    ----------
+    gdf: geopandas.GeoDataFrame
+        The GeoDataFrame containing the geometry and a field to use for the
+        transformation.
+    field_name: String
+        The label of the field containing the value to use.
+    iterations: Integer, default 5
+        The number of iteration to make.
+    inplace, Boolean, default False
+        Append in place if True. Otherwhise return a new :py:obj:GeoDataFrame
+        with transformed geometry.
+
+    Returns
+    -------
+    GeoDataFrame: A new GeoDataFrame (or None if inplace=True)
+
+    References
+    ----------
+    ``Dougenik, J. A, N. R. Chrisman, and D. R. Niemeyer. 1985.
+    "An algorithm to construct continuous cartograms."
+    Professional Geographer 37:75-81``
     """
-    cdef size_t i, k
-    cdef Holder lf
-    cdef list new_geom, tmp_bound, line_coord
-    cdef float x, y, x0, y0, cx, cy, distance, Fij, xF
-    cdef array.array xs, ys
-    cdef Py_ssize_t l_coord_bound
-    
-    new_geom = []
-    if isinstance(geom, Polygon):
-        geom = [geom]
-    for single_geom in geom:
-        boundarys = single_geom.boundary
-        tmp_bound = []
-        if not isinstance(boundarys, MultiLineString):
-            boundarys = [boundarys]
-        for single_boundary in boundarys:
-            line_coord = []
-            xs, ys = single_boundary.coords.xy
-            l_coord_bound = len(xs)
-            for k in range(l_coord_bound):
-                x = xs[k]
-                y = ys[k]
-                x0, y0 = x, y
-                # Compute the influence of all shapes on this point
-                for i in range(featCount):
-                    lf = aLocal[i]
-                    cx = lf.ptCenter_x
-                    cy = lf.ptCenter_y
-                    # Pythagorean distance
-                    distance = sqrt((x0 - cx) ** 2 + (y0 - cy) ** 2)
+    assert isinstance(iterations, int) and iterations > 0, \
+        "Iteration number have to be a positive integer"
+    try:
+        f_idx = geodf.columns.get_loc(field_name)
+    except KeyError:
+        raise KeyError('Column name \'{}\' not found'.format(field_name))
 
-                    if distance > lf.dRadius:
-                        # Calculate the force on verteces far away
-                        # from the centroid of this feature
-                        Fij = lf.dMass * lf.dRadius / distance
-                    else:
-                        # Calculate the force on verteces far away
-                        # from the centroid of this feature
-                        xF = distance / lf.dRadius
-                        Fij = lf.dMass * (xF ** 2) * (4 - (3 * xF))
-                    Fij = Fij * dForceReductionFactor / distance
-                    x = (x0 - cx) * Fij + x
-                    y = (y0 - cy) * Fij + y
-                line_coord.append((x, y))
-            tmp_bound.append(line_coord)
-
-        if len(tmp_bound) == 1:
-            poly = Polygon(tmp_bound[0])
-        else:
-            poly = MultiPolygon(
-                [Polygon(sl) for sl in MultiLineString(tmp_bound)]
-                )
-        new_geom.append(poly)
-
-    if len(new_geom) > 1:
-        return MultiPolygon(new_geom)
-    elif len(new_geom) == 1:
-        return new_geom[0]
+    if inplace:
+        Cartogram(geodf, f_idx, iterations).make()
+    else:
+        return Cartogram(geodf.copy(), f_idx, iterations).make()
 
 
-cdef class Holder(object):
-    cdef int lFID
-    cdef float ptCenter_x, ptCenter_y, dValue, dArea, dMass, dRadius
-
-    def __cinit__(self):
-        self.lFID = 0
-        self.ptCenter_x = -1
-        self.ptCenter_y = -1
-        self.dValue = -1
-        self.dArea = -1
-        self.dMass = -1
-        self.dRadius = -1
-
+ctypedef public struct Holder:
+    unsigned int lFID
+    double ptCenter_x
+    double ptCenter_y
+    double dValue
+    double dArea
+    double dMass
+    double dRadius
 
 cdef class Cartogram(object):
-    cdef object gdf
-    cdef int iterations, index_field  #, iterations_done
-    cdef Py_ssize_t total_features
+    cdef object geodf, temp_geo_serie
+    cdef unsigned int iterations, total_features
     cdef float dForceReductionFactor
+    cdef Holder *aLocal
+    cdef double[:] values
 
-    def __init__(self, object gdf, field_name, int iterations):
-        """
-        Make a continuous cartogram ("Dougenik cartogram") on a 
-        geopandas.GeoDataFrame collection of Polygon/MultiPolygon.
-    
-        Parameters
-        ----------
-        gdf: :py:obj:`geopandas.GeoDataFrame`
-            The GeoDataFrame containing the geometry and a field to use
-            for the transformation.
-        field_name: String
-            The name of the column of *gdf* containing the value to use (a 
-            numerical field is requiered).
-        iterations: Integer
-            The number of iterations to make.
+    def __init__(self, object geodf not None, int field_idx, unsigned int iterations):
+        cdef set geom_type, allowed = {'MultiPolygon', 'Polygon'}
 
-        Method
-        ------
-        Cartogram.make() : Compute the transformation
-        
-        Example
-        -------
-        >>> cartgrm = Cartogram(gdf.copy(), 'population', 4)
-        >>> res = cartgrm.make()
-        """
-        cdef Py_ssize_t total_features
-        cdef set allowed, geom_type
-
-        allowed = {'MultiPolygon', 'Polygon'}
-        geom_type = {i for i in gdf.geom_type}
+        geom_type = set(list(geodf.geom_type))
         if not geom_type.issubset(allowed):
             raise ValueError(
                 "Geometry type doesn't match 'Polygon'/'MultiPolygon"
                 )
-        self.gdf = gdf
+        self.geodf = geodf
+        self.temp_geo_serie = geodf.geometry[:]
         self.iterations = iterations
-        self.index_field = [i for i, j in enumerate(list(self.gdf.columns))
-                            if field_name in j][0]
-        self.total_features = len(self.gdf)
+        self.total_features = <unsigned int>len(self.geodf)
         self.dForceReductionFactor = 0
-        #self.iterations_done = 0
+        self.values = geodf[[field_idx]].values.T[0]
+        self.aLocal = <Holder *>malloc(self.total_features * sizeof(Holder))
+        if not self.aLocal:
+            raise MemoryError()
 
-    def make(self):
+    cpdef object make(self):
         """Fetch the result and make it available"""
-        cdef object res_geom
 
-        res_geom = self.cartogram()
-        #assert self.iterations_done == self.iterations
-        self.gdf.set_geometry(res_geom, inplace=True)
-        return self.gdf
+        self.cartogram()
+        self.geodf.set_geometry(self.temp_geo_serie, inplace=True)
+        free(self.aLocal)
+        return self.geodf
 
     cdef object cartogram(self):
         """
-        Compute the transformation
+        Compute for transformation
         (recursively, according to the specified iteration number)
         """
-        cdef int iterations, total_features, ite=0
-        cdef size_t nbi
-        cdef list aLocal
-        cdef object temp_geo_serie
-
-        total_features = self.total_features
-        iterations = self.iterations
-        temp_geo_serie = self.gdf.geometry.copy()
-
-        for ite in range(iterations):
-            aLocal = self.getinfo(self.index_field)
-
-            for nbi in range(total_features):
-                temp_geo_serie[nbi] = transform_geom(
-                    aLocal, self.dForceReductionFactor,
-                    temp_geo_serie[nbi], total_features
+        cdef unsigned int ite=0, nbi=0
+        
+        for ite in range(self.iterations):
+            self.getinfo()
+            for nbi in range(self.total_features):
+                self.temp_geo_serie[nbi] = self.transform_geom(
+                    self.temp_geo_serie[nbi]
                     )
-            #self.iterations_done += 1
-        return temp_geo_serie
 
-    cdef list getinfo(self, int index, float pi=math.pi):
+    cdef void getinfo(self):
         """
         Gets the information required for calcualting size reduction factor
         """
-        cdef int fid=0, i
+        cdef unsigned int fid=0, i, featCount = self.total_features
         cdef float dPolygonValue, dPolygonArea, dFraction, dDesired, dRadius
-        cdef float dSizeError=0, dSizeErrorTotal=0, dMean
-        cdef float area_total, value_total, tmp
-        cdef list aLocal
-        cdef Holder lfeat, lf
-        cdef Py_ssize_t featCount
+        cdef float dSizeError=0.0, dMean, pi=3.14159265
+        cdef float area_total, value_total, tmp, dSizeErrorTotal = 0.0
 
-        featCount = self.total_features
-        aLocal = []
-        area_total = sum(self.gdf.area)
-        value_total = sum(self.gdf.iloc[:, index])
+        area_total = sum(self.temp_geo_serie.area)
+        value_total = sum(self.values)
         for fid in range(featCount):
-            geom = self.gdf.geometry[fid]
-            lfeat = Holder()
-            lfeat.dArea = geom.area  # save area of this feature
-            lfeat.lFID = fid  # save id for this feature
+            geom = self.temp_geo_serie.iloc[fid]
+            self.aLocal[fid].dArea = geom.area  # save area of this feature
+            self.aLocal[fid].lFID = fid  # save id for this feature
             # save weighted 'area' value for this feature :
-            lfeat.dValue = self.gdf.iloc[fid, index]
+            self.aLocal[fid].dValue = self.values[fid]
             # save centroid coord for the feature :
-            (lfeat.ptCenter_x, lfeat.ptCenter_y) = \
+            (self.aLocal[fid].ptCenter_x, self.aLocal[fid].ptCenter_y) = \
                 (geom.centroid.coords.ctypes[0], geom.centroid.coords.ctypes[1])
-            aLocal.append(lfeat)
 
         dFraction = area_total / value_total
-
-        for i in range(featCount):
-            lf = aLocal[i]  # info for current feature
-            dPolygonValue = lf.dValue
-            dPolygonArea = lf.dArea
-            if dPolygonArea < 0:  # area should never be less than zero
-                dPolygonArea = 0
-            # this is our 'desired' area...
-            dDesired = dPolygonValue * dFraction
-            # calculate radius, a zero area is zero radius
-            dRadius = sqrt(dPolygonArea / pi)
-            lf.dRadius = dRadius
-            tmp = dDesired / pi
-            if tmp > 0:
-                # calculate area mass, don't think this should be negative
-                lf.dMass = sqrt(dDesired / pi) - dRadius
-            else:
-                lf.dMass = 0
-            # both radius and mass are being added to the feature list for
-            # later on...
-            # calculate size error...
-            dSizeError = \
-                max(dPolygonArea, dDesired) / min(dPolygonArea, dDesired)
-            # this is the total size error for all polygons
-            dSizeErrorTotal = dSizeErrorTotal + dSizeError
+        with nogil:
+            for i in range(featCount):
+                dPolygonValue = self.aLocal[i].dValue
+                dPolygonArea = self.aLocal[i].dArea
+                if dPolygonArea < 0:  # area should never be less than zero
+                    dPolygonArea = 0
+                # this is our 'desired' area...
+                dDesired = dPolygonValue * dFraction
+                # calculate radius, a zero area is zero radius
+                dRadius = sqrt(dPolygonArea / pi)
+                self.aLocal[i].dRadius = dRadius
+                tmp = dDesired / pi
+                if tmp > 0:
+                    # calculate area mass, don't think this should be negative
+                    self.aLocal[i].dMass = sqrt(dDesired / pi) - dRadius
+                else:
+                    self.aLocal[i].dMass = 0
+                # both radius and mass are being added to the feature list for
+                # later on...
+                # calculate size error...
+                dSizeError = \
+                    max(dPolygonArea, dDesired) / min(dPolygonArea, dDesired)
+                # this is the total size error for all polygons
+                dSizeErrorTotal += dSizeError
         # average error
         dMean = dSizeErrorTotal / featCount
         # need to read up more on why this is done
         self.dForceReductionFactor = 1 / (dMean + 1)
 
-        return aLocal
+    cdef object transform_geom(self, object geom,
+                               Polygon=Polygon, MultiPolygon=MultiPolygon,
+                               LineString=LineString):
+        """
+        Core function computing the transformation on the Polygon (or on each
+            polygon, if multipolygon layer), using previously retieved informations
+            about its geometry and about other feature geometries.
+        """
+        cdef unsigned int i, k, it_geom=0, it_bound=0, l_coord_bound=0
+        cdef double x, y, x0, y0, cx, cy, distance, Fij, xF
+        cdef Py_ssize_t nb_geom, nb_bound
+        cdef Holder *lf
+        cdef object boundarys
+        cdef double[:] xs, ys
+        cdef list tmp_bound, new_geom = []
+
+        if isinstance(geom, Polygon):
+            geom = [geom]
+            nb_geom = 1
+        else:
+            nb_geom = len(geom)
+        for it_geom in range(nb_geom):
+            boundarys = geom[it_geom].boundary
+            tmp_bound = []
+            try:
+                nb_bound = <unsigned int>len(boundarys)
+            except:
+                boundarys = [boundarys]
+                nb_bound = 1
+            for it_bound in range(nb_bound):
+                line_coord = []
+                xs, ys = boundarys[it_bound].coords.xy
+                l_coord_bound = <unsigned int>len(xs)
+                with nogil:
+                    for k in range(l_coord_bound):
+                        x = xs[k]
+                        y = ys[k]
+                        x0, y0 = x, y
+                        # Compute the influence of all shapes on this point
+                        for i in range(self.total_features):
+                            lf = &self.aLocal[i]
+                            cx = lf.ptCenter_x
+                            cy = lf.ptCenter_y
+                            # Pythagorean distance
+                            distance = sqrt((x0 - cx) ** 2 + (y0 - cy) ** 2)
+                            if distance > lf.dRadius:
+                                # Calculate the force on verteces far away
+                                # from the centroid of this feature
+                                Fij = lf.dMass * lf.dRadius / distance
+                            else:
+                                # Calculate the force on verteces far away
+                                # from the centroid of this feature
+                                xF = distance / lf.dRadius
+                                Fij = lf.dMass * (xF ** 2) * (4 - (3 * xF))
+                            Fij = Fij * self.dForceReductionFactor / distance
+                            x = (x0 - cx) * Fij + x
+                            y = (y0 - cy) * Fij + y
+                        with gil:
+                            line_coord.append((x, y))
+                tmp_bound.append(line_coord)
+
+            if nb_bound == 1:
+                new_geom.append(Polygon(tmp_bound[0]))
+            else:
+                for it_bound in range(nb_bound):
+                    new_geom.append(Polygon(tmp_bound[it_bound]))
+
+        if nb_geom > 1:
+            return MultiPolygon(new_geom)
+        elif nb_geom == 1:
+            return new_geom[0]
+ 
