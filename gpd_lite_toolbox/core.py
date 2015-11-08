@@ -11,10 +11,10 @@ from shapely.geometry import Point, Polygon
 from geopandas import GeoDataFrame
 from sklearn.metrics.pairwise import pairwise_distances
 
-#from .utils import (
-#    db_connect, Borderiz, dbl_range, ftouches_byid,
-#    make_index, nrepeat, mparams, dorling_radius, dorling_radius2
-#    )
+from .utils import (
+    db_connect, Borderiz, dbl_range, ftouches_byid,
+    make_index, nrepeat, mparams, dorling_radius, dorling_radius2
+    )
 
 __all__ = ['get_borders', 'find_borders', 'transform_cartogram', 'dissolve',
            'intersects_byid', 'multi_to_single', 'dumb_multi_to_single',
