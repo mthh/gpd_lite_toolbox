@@ -202,7 +202,6 @@ def transform_cartogram(gdf, field_name, iterations=5, inplace=False):
     of Polygon/MultiPolygon (wrapper to call the core functions
     written in cython).
     Based on the transformation of Dougenik and al.(1985).
-
     Parameters
     ----------
     gdf: geopandas.GeoDataFrame
@@ -215,11 +214,9 @@ def transform_cartogram(gdf, field_name, iterations=5, inplace=False):
     inplace, Boolean, default False
         Append in place if True. Otherwhise return a new :py:obj:GeoDataFrame
         with transformed geometry.
-
     Returns
     -------
     GeoDataFrame: A new GeoDataFrame (or None if inplace=True)
-
     References
     ----------
     ``Dougenik, J. A, N. R. Chrisman, and D. R. Niemeyer. 1985.
@@ -229,14 +226,15 @@ def transform_cartogram(gdf, field_name, iterations=5, inplace=False):
     from gpd_lite_toolbox.cycartogram import Cartogram
     assert isinstance(iterations, int) and iterations > 0, \
         "Iteration number have to be a positive integer"
-    assert field_name in gdf.columns
-#    assert all(gdf.geometry.is_valid)
+    try:
+        f_idx = gdf.columns.get_loc(field_name)
+    except KeyError:
+        raise KeyError('Column name \'{}\' not found'.format(field_name))
+
     if inplace:
-        crtgm = Cartogram(gdf, field_name, iterations)
-        crtgm.make()
+        Cartogram(gdf, f_idx, iterations).make()
     else:
-        crtgm = Cartogram(gdf.copy(), field_name, iterations)
-        return crtgm.make()
+        return Cartogram(gdf.copy(), f_idx, iterations).make()
 
 
 def intersects_byid(geoms1, geoms2):
