@@ -202,6 +202,7 @@ def transform_cartogram(gdf, field_name, iterations=5, inplace=False):
     of Polygon/MultiPolygon (wrapper to call the core functions
     written in cython).
     Based on the transformation of Dougenik and al.(1985).
+
     Parameters
     ----------
     gdf: geopandas.GeoDataFrame
@@ -214,9 +215,11 @@ def transform_cartogram(gdf, field_name, iterations=5, inplace=False):
     inplace, Boolean, default False
         Append in place if True. Otherwhise return a new :py:obj:GeoDataFrame
         with transformed geometry.
+ 
     Returns
     -------
     GeoDataFrame: A new GeoDataFrame (or None if inplace=True)
+
     References
     ----------
     ``Dougenik, J. A, N. R. Chrisman, and D. R. Niemeyer. 1985.
