@@ -7,20 +7,22 @@ import shapely.ops
 import numpy as np
 import pandas as pd
 from sklearn.cluster import KMeans
-from shapely.geometry import Point, Polygon
+from shapely.geometry import Point, Polygon, MultiPolygon
 from geopandas import GeoDataFrame
 from sklearn.metrics.pairwise import pairwise_distances
 
 from .utils import (
-    db_connect, Borderiz, dbl_range, ftouches_byid,
-    make_index, nrepeat, mparams, dorling_radius, dorling_radius2
+    db_connect, Borderiz, dbl_range, ftouches_byid, l_shared_border,
+    make_index, nrepeat, mparams, dorling_radius, dorling_radius2,
+    display_prop_borders
     )
 
 __all__ = ['get_borders', 'find_borders', 'transform_cartogram', 'dissolve',
            'intersects_byid', 'multi_to_single', 'dumb_multi_to_single',
            'snap_to_nearest', 'read_spatialite', 'match_lines',
            'mean_coordinates', 'non_contiguous_cartogram', 'make_grid',
-           'gridify_data', 'random_pts_on_surface']
+           'gridify_data', 'random_pts_on_surface', 'access_isocrone',
+           'display_prop_borders']
 
 
 def match_lines(gdf1, gdf2, method='cheap_hausdorff', limit=None):
@@ -215,7 +217,7 @@ def transform_cartogram(gdf, field_name, iterations=5, inplace=False):
     inplace, Boolean, default False
         Append in place if True. Otherwhise return a new :py:obj:GeoDataFrame
         with transformed geometry.
- 
+
     Returns
     -------
     GeoDataFrame: A new GeoDataFrame (or None if inplace=True)
@@ -226,18 +228,8 @@ def transform_cartogram(gdf, field_name, iterations=5, inplace=False):
     "An algorithm to construct continuous cartograms."
     Professional Geographer 37:75-81``
     """
-    from gpd_lite_toolbox.cycartogram import Cartogram
-    assert isinstance(iterations, int) and iterations > 0, \
-        "Iteration number have to be a positive integer"
-    try:
-        f_idx = gdf.columns.get_loc(field_name)
-    except KeyError:
-        raise KeyError('Column name \'{}\' not found'.format(field_name))
-
-    if inplace:
-        Cartogram(gdf, f_idx, iterations).make()
-    else:
-        return Cartogram(gdf.copy(), f_idx, iterations).make()
+    from gpd_lite_toolbox.cycartogram import make_cartogram
+    return make_cartogram(gdf, field_name, iterations, inplace)
 
 
 def intersects_byid(geoms1, geoms2):
@@ -264,7 +256,7 @@ def intersects_byid(geoms1, geoms2):
         )
 
 
-def dissolve(gdf, colname):
+def dissolve(gdf, colname, inplace=False):
     """
     Parameters
     ----------
@@ -279,12 +271,17 @@ def dissolve(gdf, colname):
     Return a new :py:obj:`geodataframe` with
     dissolved features around the selected columns.
     """
-#    gdf = gdf.copy()
+    if not inplace:
+        gdf = gdf.copy()
     df2 = gdf.groupby(colname)
     gdf.set_index(colname, inplace=True)
     gdf['geometry'] = df2.geometry.apply(shapely.ops.unary_union)
     gdf.reset_index(inplace=True)
-    return gdf.drop_duplicates(colname)
+    gdf.drop_duplicates(colname, inplace=True)
+    gdf.set_index(pd.Int64Index([i for i in range(len(gdf))]),
+                  inplace=True)
+    if not inplace:
+        return gdf
 
 
 def multi_to_single(gdf):
@@ -549,9 +546,9 @@ def random_pts_on_surface(gdf, coef=1, nb_field=None):
         nb_pts = np.array([coef for i in range(nb_ft)])
     res = []
     for i in range(nb_ft):
-        pts_to_create = nb_pts[i]
+        pts_to_create = round(nb_pts[i])
+        (minx, miny, maxx, maxy) = gdf.geometry[i].bounds
         while True:
-            (minx, miny, maxx, maxy) = gdf.geometry[i].bounds
             xpt = \
                 (maxx-minx) * np.random.random_sample((pts_to_create,)) + minx
             ypt = \
@@ -752,3 +749,178 @@ def non_contiguous_cartogram(gdf, value, nrescales,
     gdf2['geometry'] = geoms
     return gdf2
 
+
+def countour_poly(gdf, field_name, levels='auto'):
+    """
+    Parameters
+    ----------
+    gdf: :py:obj:`geopandas.GeoDataFrame`
+        The GeoDataFrame containing points and associated values.
+    field_name: String
+        The name of the column of *gdf* containing the value to use.
+    levels: int, or list of int, default 'auto'
+        The number of levels to use for contour polygons if levels is an
+        integer (exemple: levels=8).
+        Or
+        Limits of the class to use in a list/tuple (like [0, 200, 400, 800])
+        Defaults is set to 15 class.
+
+    Return
+    ------
+    collection_polygons: matplotlib.contour.QuadContourSet
+        The shape of the computed polygons.
+    levels: list of integers
+    """
+    import matplotlib.pyplot as plt
+    from matplotlib.mlab import griddata
+    if plt.isinteractive():
+        plt.ioff()
+        switched = True
+    else:
+        switched = False
+
+    # Dont take point without value :
+    gdf = gdf.iloc[gdf[field_name].nonzero()[0]][:]
+    # Try to avoid unvalid geom :
+    if len(gdf.geometry.valid()) != len(gdf):
+        # Invalid geoms have been encountered :
+        valid_geoms = gdf.geometry.valid()
+        valid_geoms = valid_geoms.reset_index()
+        valid_geoms['idx'] = valid_geoms['index']
+        del valid_geoms['index']
+        valid_geoms[field_name] = \
+            valid_geoms.idx.apply(lambda x: gdf[field_name][x])
+    else:
+        valid_geoms = gdf[['geometry', field_name]][:]
+
+    # Always in order to avoid invalid value which will cause the fail
+    # of the griddata function :
+    try: # Normal way (fails if a non valid geom is encountered)
+        x = np.array([geom.coords.xy[0][0] for geom in valid_geoms.geometry])
+        y = np.array([geom.coords.xy[1][0] for geom in valid_geoms.geometry])
+        z = valid_geoms[field_name].values
+    except:  # Taking the long way to load the value... :
+        x = np.array([])
+        y = np.array([])
+        z = np.array([], dtype=float)
+        for idx, geom, val in gdf[['geometry', field_name]].itertuples():
+            try:
+                x = np.append(x, geom.coords.xy[0][0])
+                y = np.append(y, geom.coords.xy[1][0])
+                z = np.append(z, val)
+            except Exception as err:
+                print(err)
+
+#    # compute min and max and values :
+    minx = np.nanmin(x)
+    miny = np.nanmin(y)
+    maxx = np.nanmax(x)
+    maxy = np.nanmax(y)
+
+    # Assuming we want a square grid for the interpolation
+    xi = np.linspace(minx, maxx, 200)
+    yi = np.linspace(miny, maxy, 200)
+    zi = griddata(x, y, z, xi, yi, interp='linear')
+    if isinstance(levels, (str, bytes)) and 'auto' in levels:
+        jmp = int(round((np.nanmax(z) - np.nanmin(z)) / 15))
+        levels = [nb for nb in range(0, int(round(np.nanmax(z))+1)+jmp, jmp)]
+
+    collec_poly = plt.contourf(
+        xi, yi, zi, levels, cmap=plt.cm.rainbow,
+        vmax=abs(zi).max(), vmin=-abs(zi).max(), alpha=0.35
+        )
+
+    if isinstance(levels, int):
+        jmp = int(round((np.nanmax(z) - np.nanmin(z)) / levels))
+        levels = [nb for nb in range(0, int(round(np.nanmax(z))+1)+jmp, jmp)]
+    if switched:
+        plt.ion()
+    return collec_poly, levels
+
+
+def isopoly_to_gdf(collec_poly, field_name=None, levels=None):
+    polygons, data = [], []
+
+    for i, polygon in enumerate(collec_poly.collections):
+        mpoly = []
+        for path in polygon.get_paths():
+            path.should_simplify = False
+            poly = path.to_polygons()
+            exterior, holes = [], []
+            if len(poly) > 0 and len(poly[0]) > 3:
+                exterior = poly[0]
+                if len(poly) > 1:  # There's some holes
+                    holes = [h for h in poly[1:] if len(h) > 3]
+            mpoly.append(Polygon(exterior, holes))
+        if len(mpoly) > 1:
+            mpoly = MultiPolygon(mpoly)
+            polygons.append(mpoly)
+            if levels:
+                data.append(levels[i])
+        elif len(poly) == 1:
+            polygons.append(mpoly[0])
+            if levels:
+                data.append(levels[i])
+
+    if levels and isinstance(levels, (list, tuple)) \
+            and len(data) == len(polygons):
+        if not field_name:
+            field_name = 'value'
+        return GeoDataFrame(geometry=polygons,
+                                data=data, columns=[field_name])
+    else:
+        return GeoDataFrame(geometry=polygons)
+
+
+def access_isocrone(point_origine=(21.7351529, 41.7147303),
+                    precision=0.022, size=0.35,
+                    host='http://localhost:5000'):
+    """
+    Parameters
+    ----------
+    point_origine: 2-floats tuple
+        The coordinates of the center point to use as (x, y).
+    precision: float
+        The name of the column of *gdf* containing the value to use.
+    size: float
+        Search radius (in degree).
+    host: string, default 'http://localhost:5000'
+        OSRM instance URL (no final backslash)
+
+    Return
+    ------
+    gdf_ploy: GeoDataFrame
+        The shape of the computed accessibility polygons.
+    grid: GeoDataFrame
+        The location and time of each used point.
+    point_origine: 2-floats tuple
+        The coord (x, y) of the origin point (could be the same as provided
+        or have been slightly moved to be on a road).
+    """
+    from osrm import light_table, locate
+    pt = Point(point_origine)
+    gdf = GeoDataFrame(geometry=[pt.buffer(size)])
+    grid = make_grid(gdf, precision, cut=False)
+    len(grid)
+    if len(grid) > 4000:
+        print('Too large query requiered - Reduce precision or size')
+        return -1
+    point_origine = locate(point_origine, host=host)['mapped_coordinate'][::-1]
+    liste_coords = [locate((i.coords.xy[0][0], i.coords.xy[1][0]), host=host)
+                    ['mapped_coordinate'][::-1]
+                    for i in grid.geometry.centroid]
+    liste_coords.append(point_origine)
+    matrix = light_table(liste_coords, host=host)
+    times = matrix[len(matrix)-1].tolist()
+    del matrix
+    geoms, values = [], []
+    for time, coord in zip(times, liste_coords):
+        if time != 2147483647 and time != 0:
+            geoms.append(Point(coord))
+            values.append(time/3600)
+    grid = GeoDataFrame(geometry=geoms, data=values, columns=['time'])
+    del geoms
+    del values
+    collec_poly, levels = countour_poly(grid, 'time', levels=8)
+    gdf_poly = isopoly_to_gdf(collec_poly, 'time', levels)
+    return gdf_poly, grid, point_origine
