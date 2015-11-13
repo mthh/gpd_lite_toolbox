@@ -10,7 +10,6 @@ import rtree
 import numpy as np
 import pandas as pd
 import geopandas as gpd
-#from shapely.geometry import shape
 from sklearn.preprocessing import normalize
 from sklearn.metrics.pairwise import pairwise_distances
 from shapely.geos import TopologicalError
@@ -212,11 +211,47 @@ def intersection_part_table(geoms1, geoms2):
         )
 
 
+def display_prop_borders(gdf, field_name, color='red', normalize_values=False):
+    """
+    Display border lines, proportionaly to numerical field.
+
+    Parameters
+    ----------
+    gdf: GeoDataFrame
+        The collection of linestring/multilinestring to be displayed
+    field_name: string
+        The name of the field containing values to scale the line width of
+        each border.
+
+    Return
+    ------
+    fig: matplotlib.figure.Figure
+    ax: matplotlib.axes._subplots.AxesSubplot
+    """
+    from geopandas.plotting import plot_linestring, plot_multilinestring
+    from shapely.geometry import MultiLineString
+    import matplotlib.pyplot as plt
+
+    if normalize_values:
+        vals = 5 * (normalize(gdf[field_name].astype(float))).T
+    else:
+        vals = gdf[field_name].values
+
+    fig, ax = plt.subplots()
+    for nbi, line in enumerate(gdf.geometry.values):
+        if isinstance(line, MultiLineString):
+            plot_multilinestring(ax, gdf.geometry.iloc[nbi],
+                   linewidth=vals[nbi], color='red')
+        else:
+            plot_linestring(ax, gdf.geometry.iloc[nbi],
+                   linewidth=vals[nbi], color='red')
+
+    return fig, ax
+
+
 class Borderiz(object):
     def __init__(self, gdf_polygon):
             self.gdf = gdf_polygon.copy()
-#    def __init__(self, polygon_layer_path):
-#            self.gdf = gpd.GeoDataFrame.from_file(polygon_layer_path)
 
     def run(self, tol, col_name):
         self.multi_to_singles()
@@ -226,22 +261,10 @@ class Borderiz(object):
         self._grep_border()
         return self.border
 
-    def run_v(self, tol, col_name):
-        print('MultiPolygons to Polygons..')
-        self.multitosingle()
-        print('Bufferize the polygons..')
-        self._buffer(tol)
-        print('(Non bufferized) Polygons to MultiLineStrings..')
-        self._polygon_to_lines()
-        print('Intersection of MultiLineStrings and buffers...')
-        self._buff_line_intersection(col_name)
-        print('Finding borders..')
-        self._grep_border()
-
     def _polygon_to_lines(self):
         s_t = time.time()
         self.gdf.geometry = self.gdf.geometry.boundary
-        print('{:.2f}s'.format(time.time()-s_t))
+#        print('{:.2f}s'.format(time.time()-s_t))
 
     def multi_to_singles(self):
         """Return a new geodataframe where each feature is a single-geometry"""
@@ -250,11 +273,11 @@ class Borderiz(object):
         geoms, attrs = [], []
         for i in range(len(self.gdf)-1):
             try:
-                for single_geom in geom[i]:
+                for single_geom in geom.iloc[i]:
                     geoms.append(single_geom)
                     attrs.append(values.iloc[i])
             except:
-                geoms.append(geom[i])
+                geoms.append(geom.iloc[i])
                 attrs.append(values.iloc[i])
         self.gdf = gpd.GeoDataFrame(
             attrs, geometry=geoms,
@@ -265,7 +288,7 @@ class Borderiz(object):
         s_t = time.time()
         self.buffered = self.gdf.copy()
         self.buffered.geometry = self.buffered.geometry.buffer(tol)
-        print('{:.2f}s'.format(time.time()-s_t))
+#        print('{:.2f}s'.format(time.time()-s_t))
 
     def _buff_line_intersection(self, col_name):
         s_t = time.time()
@@ -273,11 +296,9 @@ class Borderiz(object):
         resgappd = resgeom.append
         resaappd = resattrs.append
         res = self.intersects_table()
-#        print(res)
         for i, _ in enumerate(res):
             fti = self.gdf.iloc[i]
             i_geom = self.gdf.geometry.iloc[i]
-#            print(res[i])
             for j in res[i]:
                 ftj = self.buffered.iloc[j]
                 j_geom = self.buffered.geometry.iloc[j]
@@ -296,9 +317,9 @@ class Borderiz(object):
             )
 #        self.result = self.result.ix[[not self.result.geometry[i].is_ring
 #                                      for i in range(len(self.result)-1)]]
-        print(
-            '{:.2f}s ({} features)'.format(time.time()-s_t, len(self.result))
-            )
+#        print(
+#            '{:.2f}s ({} features)'.format(time.time()-s_t, len(self.result))
+#            )
 
     def _filt(self, ref):
         for ii in range(len(self.result)):
@@ -326,8 +347,8 @@ class Borderiz(object):
                     print(err)
                     pass
         self.border = gpd.GeoDataFrame(self.border)
-        print('{:.2f}s'.format(time.time()-s_t))
-        print('len(seen) : ', len(seen), ' | len(border) : ', len(self.border))
+#        print('{:.2f}s'.format(time.time()-s_t))
+#        print('len(seen) : ', len(seen), ' | len(border) : ', len(self.border))
 
     def intersects_table(self):
         """
