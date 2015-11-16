@@ -57,9 +57,9 @@ m_plot_dataframe(grid, column='time', contour_poly_width=0.5, edgecolor="grey")
 
 <matplotlib.axes._subplots.AxesSubplot at 0xfa08d68>
 
-
-![png](misc/output_6_1.png)
 ```
+![png](misc/output_6_1.png)
+
 
 
 
@@ -72,10 +72,10 @@ gdf_grid_pop.plot()
 
 <matplotlib.axes._subplots.AxesSubplot at 0x11c88b00>
 
-
+```
 ![png](misc/output_9_1.png)
 
-
+```python
 mean_coord = glt.mean_coordinates(gdf_grid_pop, id_field='ID_N_sup', weight_field='TOT_P')
 
 
@@ -84,9 +84,9 @@ mean_coord.plot()
 
 <matplotlib.axes._subplots.AxesSubplot at 0x75fcb8d0>
 
-
-![png](misc/output_11_1.png)
 ```
+![png](misc/output_11_1.png)
+
 
 #### Make a continous cartogram (Dougenik & al. algorithm)
 
@@ -97,9 +97,9 @@ cartogram.plot()
 
 <matplotlib.axes._subplots.AxesSubplot at 0x64da9b70>
 
-
-![png](misc/output_13_1.png)
 ```
+![png](misc/output_13_1.png)
+
 
 #### Display some random points on the surface of polygons (based, or not, on a numerical field)
 
@@ -112,9 +112,9 @@ rand_pts.plot()
 
 <matplotlib.axes._subplots.AxesSubplot at 0x6f025d68>
 
-
-![png](misc/output_16_1.png)
 ```
+![png](misc/output_16_1.png)
+
 
 #### Compute accessibility isocrones from an OSRM local instance
 
@@ -128,9 +128,8 @@ rand_pts.plot()
 
     <matplotlib.axes._subplots.AxesSubplot at 0x82ad2cf8>
 
-
-![png](misc/output_19_1.png)
 ```
+![png](misc/output_19_1.png)
 
 #### Dissolve a layer according to a field
 
@@ -141,19 +140,19 @@ rand_pts.plot()
 
     <matplotlib.axes._subplots.AxesSubplot at 0x16435588>
 
-
+```
 ![png](misc/output_21_1.png)
 
-
+```python
     gdf_cntr = glt.dissolve(gdf_n23, colname='country')
     gdf_cntr.plot()
 
 
     <matplotlib.axes._subplots.AxesSubplot at 0x1bb13898>
 
-
-![png](misc/output_22_1.png)
 ```
+![png](misc/output_22_1.png)
+
 
 #### Extract the border line between polygons
 **_(and get nearby polygons attributes on the extracted border polylines)_**
@@ -194,7 +193,7 @@ fig.suptitle("Map the extracted borders with proportional lines",
              size=14)
 
 <matplotlib.text.Text at 0x21bf8828>
-
+```
 
 ![png](misc/output_26_1.png)
-```
+
