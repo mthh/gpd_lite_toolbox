@@ -211,42 +211,58 @@ def intersection_part_table(geoms1, geoms2):
         )
 
 
-def display_prop_borders(gdf, field_name, color='red', normalize_values=False):
+def make_prop_lines(gdf, field_name, color='red', normalize_values=False,
+                    norm_min=None, norm_max=None, axes=None):
     """
-    Display border lines, proportionaly to numerical field.
+    Display a GeoDataFrame collection of (Multi)LineStrings,
+    proportionaly to numerical field.
 
     Parameters
     ----------
     gdf: GeoDataFrame
         The collection of linestring/multilinestring to be displayed
-    field_name: string
+    field_name: String
         The name of the field containing values to scale the line width of
         each border.
+    color: String
+        The color to render the lines with.
+    normalize_values: Boolean, default False
+        Normalize the value of the 'field_name' column between norm_min and
+        norm_max.
+    norm_min: float, default None
+        The linewidth for the minimum value to plot.
+    norm_max: float, default None
+        The linewidth for the maximum value to plot.
+    axes:
+        Axes on which to draw the plot.
 
     Return
     ------
-    fig: matplotlib.figure.Figure
-    ax: matplotlib.axes._subplots.AxesSubplot
+    axes: matplotlib.axes._subplots.AxesSubplot
     """
     from geopandas.plotting import plot_linestring, plot_multilinestring
     from shapely.geometry import MultiLineString
     import matplotlib.pyplot as plt
 
-    if normalize_values:
-        vals = 5 * (normalize(gdf[field_name].astype(float))).T
+    if normalize_values and norm_max and norm_min:
+        vals = (norm_max - norm_min) * (normalize(gdf[field_name].astype(float))).T + norm_min
+    elif normalize_values:
+        print('Warning : values where not normalized '
+              '(norm_max or norm_min is missing)')
+        vals = gdf[field_name].values
     else:
         vals = gdf[field_name].values
 
-    fig, ax = plt.subplots()
+    if not axes:
+        axes = plt.gca()
     for nbi, line in enumerate(gdf.geometry.values):
         if isinstance(line, MultiLineString):
-            plot_multilinestring(ax, gdf.geometry.iloc[nbi],
-                   linewidth=vals[nbi], color='red')
+            plot_multilinestring(axes, gdf.geometry.iloc[nbi],
+                                 linewidth=vals[nbi], color=color)
         else:
-            plot_linestring(ax, gdf.geometry.iloc[nbi],
-                   linewidth=vals[nbi], color='red')
-
-    return fig, ax
+            plot_linestring(axes, gdf.geometry.iloc[nbi],
+                            linewidth=vals[nbi], color=color)
+    return axes
 
 
 class Borderiz(object):
