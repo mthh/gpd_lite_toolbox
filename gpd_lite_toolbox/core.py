@@ -14,15 +14,13 @@ from sklearn.metrics.pairwise import pairwise_distances
 from .utils import (
     db_connect, Borderiz, dbl_range, ftouches_byid, l_shared_border,
     make_index, nrepeat, mparams, dorling_radius, dorling_radius2,
-    display_prop_borders
     )
 
-__all__ = ['get_borders', 'find_borders', 'transform_cartogram', 'dissolve',
+__all__ = ('get_borders', 'find_borders', 'transform_cartogram', 'dissolve',
            'intersects_byid', 'multi_to_single', 'dumb_multi_to_single',
            'snap_to_nearest', 'read_spatialite', 'match_lines',
            'mean_coordinates', 'non_contiguous_cartogram', 'make_grid',
-           'gridify_data', 'random_pts_on_surface', 'access_isocrone',
-           'display_prop_borders']
+           'gridify_data', 'random_pts_on_surface', 'access_isocrone')
 
 
 def match_lines(gdf1, gdf2, method='cheap_hausdorff', limit=None):
@@ -432,7 +430,7 @@ def read_spatialite(sql, conn, geom_col='geometry', crs=None,
     -------
     gdf: GeoDataframe
 
-    Exemple
+    Example
     -------
     >>> # With a connection object (conn) already instancied :
     >>> gdf = read_spatialite("SELECT PK_UID, pop_t, gdp FROM countries", conn,
@@ -618,7 +616,7 @@ def make_grid(gdf, height, cut=True):
             res = GeoDataFrame(
                 geometry=pd.Series(res_geoms).apply(lambda x: Polygon(x)),
                 crs=gdf.crs
-                ).intersection(unary_union(gdf.geometry).convex_hull)
+                ).intersection(unary_union(gdf.geometry))
         else:
             res = GeoDataFrame(
                 geometry=pd.Series(res_geoms).apply(lambda x: Polygon(x)),
