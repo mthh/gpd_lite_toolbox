@@ -1,4 +1,4 @@
-### gpd_lite_toolboox
+### gpd_lite_toolbox
 Mini toolbox using geopandas/GeoDataFrame and providing some convenience functions. 
 (read from spatialite, snap points on lines/polygons, match linestring segments, make continous cartogram or non-contiguous cartogram, dissolve or explode a layer, compute weighted mean coordinates, etc.) 
 
