@@ -7,7 +7,7 @@ Copy-paste from geopandas.plotting module with only minor modif. in order to
 take linewidth and edgecolor on polygon plotting into account.
 """
 from geopandas.plotting import (
-    _mapclassify_choro, plot_series, plot_multilinestring
+    _mapclassify_choro, plot_series, plot_point_collection  plot_linestring_collection
     )
 import numpy as np
 
@@ -128,10 +128,10 @@ def m_plot_dataframe(s, column=None, colormap=None, alpha=0.5, edgecolor=None,
                                     edgecolor=edgecolor,
                                     linewidth=contour_poly_width, alpha=alpha)
             elif geom.type == 'LineString' or geom.type == 'MultiLineString':
-                plot_multilinestring(ax, geom, color=cmap.to_rgba(value))
+                plot_linestring_collection(ax, [geom], colors=[cmap.to_rgba(value)])
             # TODO: color point geometries
             elif geom.type == 'Point':
-                plot_point(ax, geom)
+                plot_point_collection(ax, [geom])
         if legend:
             if categorical:
                 patches = []
@@ -146,7 +146,3 @@ def m_plot_dataframe(s, column=None, colormap=None, alpha=0.5, edgecolor=None,
                 raise NotImplementedError
     plt.draw()
     return ax
-
-def plot_point(ax, pt, marker='o', markersize=2, color='black'):
-    """ Plot a single Point geometry """
-    ax.plot(pt.x, pt.y, marker=marker, markersize=markersize, color=color)
