@@ -7,7 +7,7 @@ Copy-paste from geopandas.plotting module with only minor modif. in order to
 take linewidth and edgecolor on polygon plotting into account.
 """
 from geopandas.plotting import (
-    _mapclassify_choro, plot_series, plot_point_collection  plot_linestring_collection
+    _mapclassify_choro, plot_series, plot_point_collection, plot_linestring_collection
     )
 import numpy as np
 
