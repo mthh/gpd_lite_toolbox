@@ -7,7 +7,7 @@ Copy-paste from geopandas.plotting module with only minor modif. in order to
 take linewidth and edgecolor on polygon plotting into account.
 """
 from geopandas.plotting import (
-    norm_cmap, __pysal_choro, plot_series, plot_point, plot_multilinestring
+    __pysal_choro, plot_series, plot_point, plot_multilinestring
     )
 import numpy as np
 
@@ -111,7 +111,11 @@ def m_plot_dataframe(s, column=None, colormap=None, alpha=0.5, edgecolor=None,
             values = s[column]
         if scheme is not None:
             values = __pysal_choro(values, scheme, k=k)
-        cmap = norm_cmap(values, colormap, Normalize, cm)
+        
+        mn = values.min() if vmin is None else vmin
+        mx = values.max() if vmax is None else vmax
+        norm = Normalize(vmin=mn, vmax=mx)
+        cmap = cm.ScalarMappable(norm=norm, cmap=colormap)
         if not axes:
             fig = plt.gcf()
             fig.add_subplot(111, aspect='equal')
