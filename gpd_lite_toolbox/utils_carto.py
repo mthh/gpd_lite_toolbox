@@ -111,10 +111,8 @@ def m_plot_dataframe(s, column=None, colormap=None, alpha=0.5, edgecolor=None,
             values = s[column]
         if scheme is not None:
             values = _mapclassify_choro(values, scheme, k=k)
-        
-        mn = values.min() if vmin is None else vmin
-        mx = values.max() if vmax is None else vmax
-        norm = Normalize(vmin=mn, vmax=mx)
+
+        norm = Normalize(vmin=values.min(), vmax=values.max())
         cmap = cm.ScalarMappable(norm=norm, cmap=colormap)
         if not axes:
             fig = plt.gcf()
