@@ -589,8 +589,8 @@ def make_grid(gdf, height, cut=True):
     from shapely.ops import unary_union
     xmin, ymin = [i.min() for i in gdf.bounds.T.values[:2]]
     xmax, ymax = [i.max() for i in gdf.bounds.T.values[2:]]
-    rows = ceil((ymax-ymin) / height)
-    cols = ceil((xmax-xmin) / height)
+    rows = int(ceil((ymax-ymin) / height))
+    cols = int(ceil((xmax-xmin) / height))
 
     x_left_origin = xmin
     x_right_origin = xmin + height
