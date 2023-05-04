@@ -12,7 +12,7 @@ import pandas as pd
 import geopandas as gpd
 from sklearn.preprocessing import normalize
 from sklearn.metrics.pairwise import pairwise_distances
-from shapely.geos import TopologicalError
+from shapely.errors import TopologicalError
 
 def nrepeat(iterable, n):
     return iter([i for i in iterable for j in range(n)])
